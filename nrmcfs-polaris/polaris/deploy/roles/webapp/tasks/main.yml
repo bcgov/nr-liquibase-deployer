@@ -1,0 +1,115 @@
+---
+- name: Set alt app dir name
+  set_fact:
+    webapp_app_dir_name: "{{ alt_app_dir_name }}"
+  when: alt_app_dir_name is defined
+
+- name: Set standard app dir name
+  set_fact:
+    webapp_app_dir_name: "{{ webapp_war.context }}"
+  when: alt_app_dir_name is not defined
+
+- name: "undeploy {{ webapp_app_dir_name }} from {{ webapp_tomcat_webapps_dir }}"
+  file:
+    path: "{{ webapp_tomcat_webapps_dir }}/{{ webapp_app_dir_name }}"
+    state: absent
+  become: yes
+  become_user: "{{ webapp_user }}"
+
+- name: "copy webapp war from controller"
+  environment: "{{ (proxy_env_dev_test if proxy_env == 'dev' or proxy_env == 'test') or (proxy_env_prod if proxy_env == 'prod') | default({}) }}"
+  ansible.builtin.copy:
+    src: "/ansible/downloads/{{ pd_prop_artifact_name }}"
+    dest: "{{ webapp_staging_dir }}/{{ pd_prop_artifact_name }}"
+    mode: "0755"
+  become: yes
+  become_user: "{{ webapp_user }}"
+
+- name: ""
+  file:
+    path: "{{ webapp_staging_dir }}/.{{ webapp_war.context }}"
+    state: directory
+  become: yes
+  become_user: "{{ webapp_user }}"
+
+- name: "extract webapp war"
+  unarchive:
+    src: "{{ webapp_staging_dir }}/{{ pd_prop_artifact_name }}"
+    dest: "{{ webapp_staging_dir }}/.{{ webapp_war.context }}"
+    remote_src: yes
+  become: yes
+  become_user: "{{ webapp_user }}"
+
+- name: 'remove superfluous logging files'
+  file:
+    path: "{{ webapp_staging_dir }}/.{{ webapp_war.context }}/WEB-INF/classes/log4j.properties"
+    state: 'absent'
+  become: yes
+  become_user: "{{ webapp_user }}"
+  when: webapp_configure_log4j_enabled
+
+- name: 'configure logging log4j v2'
+  template:
+    src: 'log4j2.xml.j2'
+    dest: "{{ webapp_staging_dir }}/.{{ webapp_war.context }}/WEB-INF/classes/log4j2.xml"
+  become: yes
+  become_user: "{{ webapp_user }}"
+  when: webapp_configure_log4j_enabled
+
+- name: 'configure context'
+  template:
+    src: 'context.xml.j2'
+    dest: "{{ webapp_staging_dir }}/.{{ webapp_war.context }}/META-INF/context.xml"
+  become: yes
+  become_user: "{{ webapp_user }}"
+  when: webapp_configure_context_enabled
+
+# Default ojdbc version set in role defaults, but can be overridden in playbook or
+# sdk-config. Target ojdbc URL needs to be IIT Artifactory and file needs to exist there.
+- name: install ojdbc
+  get_url:
+    url: "{{ ojdbc_url }}/{{ ojdbc_file }}"
+    dest: "{{ webapp_staging_dir }}/.{{ webapp_war.context }}/WEB-INF/lib/{{ ojdbc_file }}"
+    timeout: 100
+  become: yes
+  become_user: "{{ webapp_user }}"
+  ignore_errors: yes
+  when: not skip_ojdbc_install
+
+- name: show installed ojdbc source and version for reference purposes
+  debug:
+    msg: "{{ ojdbc_url }}/{{ ojdbc_file }}"
+  when: not skip_ojdbc_install
+
+- name: "directory {{ webapp_tomcat_webapps_dir }}/{{ webapp_app_dir_name }}"
+  file:
+    path: "{{ webapp_tomcat_webapps_dir }}/{{ webapp_app_dir_name }}"
+    state: "directory"
+    mode: "0755"
+  become: yes
+  become_user: "{{ webapp_user }}"
+
+- name: Patch intention
+  include_role:
+    name: patch_intention
+  vars:
+    _log_dir: "{{ webapp_log_dir }}"
+    _log_filename: "{{ webapp_log_filename }}"
+    _log_level: "{{ webapp_root_log_level }}"
+    _log_provider: "{{ webapp_log_provider }}"
+    _log_type: "tomcat"
+
+- name: "deploy {{ webapp_app_dir_name }}"
+  command: "cp -a {{ webapp_staging_dir }}/.{{ webapp_war.context }}/. {{ webapp_tomcat_webapps_dir }}/{{ webapp_app_dir_name }}"
+  become: yes
+  become_user: "{{ webapp_user }}"
+
+- name: 'clean up staging assets'
+  file:
+    path: "{{ item }}"
+    state: 'absent'
+  become: yes
+  become_user: "{{ webapp_user }}"
+  with_items:
+    - "{{ webapp_staging_dir }}/.{{ webapp_war.context }}"
+    - "{{ webapp_staging_dir }}/{{ pd_prop_artifact_name }}"

@@ -1,0 +1,30 @@
+---
+- name: "Ensure the target environment has been specified"
+  assert:
+    that:
+      - cdconf_target is defined
+      - cd_version is defined
+      - github_token is defined and (github_token | length > 0)
+
+- name: Get playbook variables file from GitHub
+  ansible.builtin.uri:
+    url: "{{ playbook_vars_url | trim }}"
+    dest: "{{ lookup('env','PWD') }}/playbook_vars.yml"
+    headers:
+      Authorization: "Bearer {{ github_token }}"
+    force: yes
+  environment: '{{ (proxy_env_dev_test if proxy_env == "dev" or proxy_env == "test") or (proxy_env_prod if proxy_env == "prod") | default({}) }}'
+  when: github_token is defined and (github_token | length > 0)
+
+- name: Get variables from configuration file
+  include_vars: "{{ lookup('env','PWD') }}/playbook_vars.yml"
+
+- name: "Flatten target variables for {{ cdconf_target }}"
+  set_fact:
+     "{{ item.key }}": "{{item.value}}"
+  with_dict:
+     - "{{ lookup('vars', cdconf_target) }}"
+
+- name: "Set variables for liquibase deployment"
+  set_fact:
+     cd_app_home: "/apps_ux/{{ project }}/{{ artifact_id }}"

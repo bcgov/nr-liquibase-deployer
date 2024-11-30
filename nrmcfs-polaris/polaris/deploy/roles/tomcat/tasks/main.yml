@@ -1,0 +1,111 @@
+---
+- name: Get Latest Tomcat Minor Version
+  shell: "curl -s {{ tomcat_mirror }}/dist/tomcat/tomcat-{{ tomcat_major_version }}/ | grep -oP '(?<=v){{ tomcat_major_version }}\\.\\d+\\.\\d+' | sort -Vr | head -n1"
+  environment: "{{ (proxy_env_dev_test if proxy_env == 'dev' or proxy_env == 'test') or (proxy_env_prod if proxy_env == 'prod') | default({}) }}"
+  register: latest_tomcat_minor_version
+
+- name: Set Tomcat Version number
+  set_fact:
+    tomcat_version: "{{ tomcat_version_number | default(latest_tomcat_minor_version.stdout, true) }}"
+
+- name: "Show download info"
+  debug:
+    msg: "tomcat_major_version: {{ tomcat_major_version }} and tomcat_version: {{ tomcat_version }}"
+
+- name: Checking for alternate app directory name
+  set_fact:
+    using_alt_app_dir: true
+  when: alt_app_dir_name is defined
+
+- debug:
+    msg: 'ensuring Tomcat is stopped'
+  changed_when: true
+  notify: stop tomcat - {{ tomcat_handler_style }}
+
+- meta: flush_handlers
+
+- name: required directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0775"
+  with_items:
+    - "{{ tomcat_install_dir }}"
+    - "{{ tomcat_data_dir }}"
+    - "{{ tomcat_log_dir }}"
+    - "{{ tomcat_webapp_dir }}"
+  become: yes
+  become_user: "{{ tomcat_install_as }}"
+
+- name: Set Tomcat Download URL
+  set_fact:
+    tomcat_download_url: "{{ tomcat_mirror }}/dist/tomcat/tomcat-{{ tomcat_major_version }}/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.zip"
+
+- uri:
+    url: "{{ tomcat_download_url + '.' + tomcat_checksum_protocol }}"
+    return_content: true
+  environment: "{{ (proxy_env_dev_test if proxy_env == 'dev' or proxy_env == 'test') or (proxy_env_prod if proxy_env == 'prod') | default({}) }}"
+  register: tomcat_checksum
+
+- set_fact:
+    tomcat_checksum: "{{ tomcat_checksum.content.split(' ')[0] }}"      # there are 2 spaces
+
+- name: download to {{ tomcat_download_tmp_dir }}/{{ tomcat_download_url | basename }}
+  get_url:
+    url: "{{ tomcat_download_url }}"
+    dest: "{{ tomcat_download_tmp_dir }}/{{ tomcat_download_url | basename }}"
+    checksum: "{{ tomcat_checksum_protocol }}:{{ tomcat_checksum }}"
+    timeout: "{{ timeout | default(100) }}"
+    mode: "0755"
+  environment: "{{ (proxy_env_dev_test if proxy_env == 'dev' or proxy_env == 'test') or (proxy_env_prod if proxy_env == 'prod') | default({}) }}"
+  become: yes
+  become_user: "{{ tomcat_install_as }}"
+
+- name: load task list for Tomcat {{ tomcat_version }}
+  include: "install-tomcat.yml"
+
+- name: service directory {{ tomcat_service_dir }}
+  file:
+    path: "{{ tomcat_service_dir }}"
+    mode: "0775"
+    state: directory
+  become: yes
+  become_user: "{{ tomcat_install_as }}"
+
+- name: run script {{ tomcat_service_dir }}/run
+  template:
+    src: "run.j2"
+    dest: "{{ tomcat_service_dir }}/run"
+    mode: "0775"
+  become: yes
+  become_user: "{{ tomcat_install_as }}"
+
+- name: Patch intention
+  include_role:
+    name: patch_intention
+  vars:
+    _tomcat_version: "{{ tomcat_version }}"
+    _tomcat_port: "{{ tomcat_port }}"
+
+- name: Until CMDB is ready, register port for port-manager
+  file:
+    path: "{{ tomcat_install_dir }}/port:{{ tomcat_https_port }}"
+    state: touch
+  become: yes
+  become_user: "{{ tomcat_install_as }}"
+
+- name: Release port reservation
+  file:
+    path: "/tmp/ports-tmp/port:{{ tomcat_https_port }}"
+    state: absent
+  become: yes
+  become_user: wwwadm
+
+- name: Enable rotation of catalina.out
+  blockinfile:
+    path: "{{ tomcat_install_dir }}/bin/catalina.sh"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    insertafter: '= "run"'
+    block: "{{ lookup('file', 'files/rotate_catalina') }}"
+  become: yes
+  become_user: "{{ tomcat_install_as }}"
