@@ -1,6 +1,0 @@
----
-portmanager_app_dir: "{{ apps_home }}"
-portmanager_first_dir: "{{ pd_prop_project_name }}/{{ pd_prop_service_name }}"
-portmanager_script_name: port_manager.pl
-portmanager_assignments: {}
-portmanager_debug: False
