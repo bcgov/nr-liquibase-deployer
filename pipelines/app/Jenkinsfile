@@ -14,7 +14,7 @@ pipeline {
 		GIT_BRANCH = "${params.gitBranch}"
 		EVENT_PROVIDER = "${params.eventProvider}"
 		ANSIBLE_COLLECTION_VERSION = "${params.ansibleCollectionBranchTag != null && params.ansibleCollectionBranchTag != "" ? ",${params.ansibleCollectionBranchTag}" : ",v2.0.5"}"
-		PODMAN_ANSIBLE_COLLECTION_URL = "github.com/itcgkstrong/nrmcfs-polaris.git#nr-polaris-collection/deploy${env.ANSIBLE_COLLECTION_VERSION}"
+		PODMAN_ANSIBLE_COLLECTION_URL = "github.com/bcgov/nr-liquibase-deployer.git#deploy${env.ANSIBLE_COLLECTION_VERSION}"
 		PODMAN_ANSIBLE_COLLECTION_PATH = "./collections/ansible_collections"
 		GIT_CREDS = credentials('ci-user')
 		GIT_CREDS_USR = GIT_CREDS_USR.replaceFirst('@', '%40')
