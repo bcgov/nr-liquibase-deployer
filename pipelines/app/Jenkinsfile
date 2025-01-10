@@ -10,12 +10,14 @@ pipeline {
     environment {
 		PROJECT = "${params.project}"
 		COMPONENT = "${params.component}"
+		APP_RELEASE = "${params.release}"
 		GIT_REPO = "${params.gitRepo}"
 		GIT_BRANCH = "${params.gitBranch}"
 		EVENT_PROVIDER = "${params.eventProvider}"
 		ANSIBLE_COLLECTION_VERSION = "${params.ansibleCollectionBranchTag != null && params.ansibleCollectionBranchTag != "" ? ",${params.ansibleCollectionBranchTag}" : ",v2.0.5"}"
 		PODMAN_ANSIBLE_COLLECTION_URL = "github.com/bcgov/nr-liquibase-deployer.git#deploy${env.ANSIBLE_COLLECTION_VERSION}"
 		PODMAN_ANSIBLE_COLLECTION_PATH = "./collections/ansible_collections"
+		PLAYBOOK_FILE = "src/cd/playbooks/vars/playbook_vars.yml"
 		GIT_CREDS = credentials('ci-user')
 		GIT_CREDS_USR = GIT_CREDS_USR.replaceFirst('@', '%40')
 		CONFIG_ROLE_ID = credentials('knox-jenkins-jenkins-apps-prod-role-id')
@@ -43,19 +45,19 @@ pipeline {
             }
             steps {
                 script {
-                    sh 'rm -rf app'
+                    sh 'rm -rf database'
                     sh 'rm -rf downloads ; mkdir downloads'
                     if (env.GITHUB_PRIVATE_REPO) {
                         env.GITHUB_USER = "${params.githubUser}"
                         env.GITHUB_TOKEN = "${params.githubToken}"
                         wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[var: env.GITHUB_TOKEN, password: GITHUB_TOKEN]]]) {
-                            sh 'git clone --branch ${GIT_BRANCH} https://${GITHUB_USER}:${GITHUB_TOKEN}@${GIT_REPO} app'
+                            sh 'git clone --branch ${GIT_BRANCH} https://${GITHUB_USER}:${GITHUB_TOKEN}@${GIT_REPO}/database database'
                             if (DOWNLOAD_TYPE.toUpperCase().trim() == 'GITHUB') {
                                 sh 'cd downloads ; curl -LO "${DOWNLOAD_URL}" -H "Authorization: token ${GITHUB_TOKEN}"'
                             }
                         }
                     } else {
-                        sh 'git clone --branch ${GIT_BRANCH} https://${GIT_REPO} app'
+                        sh 'git clone --branch ${GIT_BRANCH} https://${GIT_REPO}/database database'
                         if (DOWNLOAD_TYPE.toUpperCase().trim() == 'GITHUB') {
                             sh 'cd downloads ; curl -LO ${DOWNLOAD_URL}'
                         }
@@ -111,7 +113,7 @@ pipeline {
                 script {
                     try {
                         echo 'Do delivery deployment'
-                        intention = new BrokerIntention(readJSON(file: "app/.jenkins/deployment-intention.json"))
+                        intention = new BrokerIntention(readJSON(file: "database/.jenkins/deployment-intention.json"))
                         intention.setEventDetails(
                             userName: env.CAUSE_USER_ID,
                             url: env.BUILD_URL,
@@ -172,6 +174,18 @@ pipeline {
                             authfile: "${env.AUTHFILE}",
                             options: "-v \$(pwd):/ansible -e PODMAN_*",
                             command: 'ansible-galaxy collection install git+https://${PODMAN_ANSIBLE_COLLECTION_URL} -p ${PODMAN_ANSIBLE_COLLECTION_PATH}')
+                        //DEV TODO: need to feed app values into local_vars.yml or equivalent
+/*
+playbook_vars_url:  ${PLAYBOOK_FILE}
+cd_version: ${APP_RELEASE}
+pd_prop_project_name: ${PROJECT}
+pd_prop_service_name: ${COMPONENT}
+pd_prop_service_install_directory:
+proxy_env:
+github_token: ${params.githubToken}
+cdconf_target: dlvr
+db_actions: status
+*/
                         podman.run("willhallonline/ansible:2.12-alpine-3.16",
                             authfile: "${env.AUTHFILE}",
                             options: "-v \$(pwd)/collections:/ansible/app/playbooks/collections \
@@ -180,12 +194,11 @@ pipeline {
                                 -v \$(pwd)/files/ansible/ansible.cfg:/etc/ansible/ansible.cfg \
                                 -v \$(pwd)/downloads:/ansible/downloads \
                                 -e PODMAN_* -e ACTION_TOKEN_* -e COMPONENT*",
-                                //DEV TODO: need to feed app values into local_vars.yml or equivalent
                             command: 'ansible-playbook -i inventory/${PODMAN_ANSIBLE_INVENTORY_PATH} \
-								-i collections/ansible_collections/polaris/deploy/inventory/localhost \
+								-i ${PODMAN_ANSIBLE_COLLECTION_PATH}/polaris/deploy/inventory/localhost \
+								-vvv \
 								--extra-vars @./local_vars.yml \
-								collections/ansible_collections/polaris/deploy/playbooks/liquibase.yml -v \
-                                app/playbooks/playbook.yaml --extra-vars "env_vars=dev"')
+								${PODMAN_ANSIBLE_COLLECTION_PATH}/polaris/deploy/playbooks/liquibase.yml')
                         podman.logout(authfile: "${env.AUTHFILE}")
                         intention.endAction("install")
                         vault.revokeToken()
