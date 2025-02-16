@@ -1,0 +1,9 @@
+#Template local variables file. Uncomment to pre-fill data in the playbook
+playbook_vars_url: https://raw.githubusercontent.com/bcgov-nr/nrmcfs-ffs/refs/heads/release/7.10.1/database/src/cd/playbooks/vars/playbook_vars.yml
+cdconf_target: dlvr   # (dlvr | test | prod)
+# For SNAPSHOT versions. NB - there is an issue with GitHub maven repos not allowing this to work.
+#cd_version: 7.10.1-SNAPSHOT
+cd_version: 7.10.1
+
+# GitHub PAT to download the migrations
+github_token:
