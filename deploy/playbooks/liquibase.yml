@@ -1,0 +1,46 @@
+---
+- name: liquibase migration
+  hosts: deployment-servers
+  collections:
+    - bcgov.nr
+  vars:
+    - apps_home: "/apps_ux"
+  vars_prompt:
+    - name: "db_actions"
+      prompt: "Liquibase Actions - one or more CSV of update, verify, rollback, test_rollback, teardown_core, status, run in order.)"
+      private: no
+  # The following variables need to be defined:
+  #
+  # playbook_vars_url:  https://raw.githubusercontent.com/bcgov-nr/nrmcfs-fsbwhse/refs/heads/feat/updateLiquibaaseConfig/database/src/cd/playbooks/vars/playbook_vars.yml
+  # cd_version: 7.8.2-SNAPSHOT
+  # pd_prop_project_name: NRMCFS
+  # pd_prop_service_name: nrmcfs-fsbwhse-db
+  # pd_prop_service_install_directory: <empty>
+  # cdconf_target: test (matches the playbook_vars.yml file in the application repo
+  # fsbwhse_db_password:
+  # proxy_env:
+  # github_token:
+  #
+  # Currently run in a ansible-provisioned docker container as follows:
+  # ansible-playbook \
+  #      -i collections/ansible_collections/polaris/deploy/inventory/localhost \
+  #      -vvv \
+  #      --extra-vars @./local_vars.yml \
+  #      collections/ansible_collections/polaris/deploy/playbooks/liquibase.yml
+
+  roles:
+    - name: liquibase_configure
+
+    # install a JDK specific to this application
+    - name: jdk
+      vars:
+        # jdk_version: '8'
+        cd_app_install: '{{ cd_app_home }}' # cd_app_home provided by cd-configure
+        sign_jdk: False
+        jdk_install_as: 'runner'
+
+    - name: liquibase
+      vars:
+         artifact_version: "{{ cd_version }}"
+         #TODO - This could be done as a configuration variable in the liquibase role
+         db_jdbc_driver_url: "https://download.oracle.com/otn-pub/otn_software/jdbc/235/ojdbc11.jar"
